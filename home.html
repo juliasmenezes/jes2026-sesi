@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#E10600">
+  <title>JES 2026 — Placar ao vivo</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>document.documentElement.setAttribute('data-turno', localStorage.getItem('jes2026_categoria') || 'manha');</script>
+</head>
+<body>
+  <div id="app-header"></div>
+
+  <main>
+    <section class="hero">
+      <div class="hero-photo" style="background-image:url('img/image.png')"></div>
+      <div class="hero-panel">
+        <p class="hero-turno" id="hero-turno"></p>
+        <h1>Jogos Estudantis<br>SESI 2026</h1>
+        <p class="hero-lead">Futsal, basquete, vôlei e handebol com placar, lance a lance e classificação em tempo real.</p>
+        <div class="hero-cta">
+          <a class="btn btn-light" href="#ao-vivo">Ver placar ao vivo</a>
+          <a class="btn btn-outline-light" href="tabela-jogos.html">Tabela de jogos</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="container">
+      <section class="section" id="ao-vivo">
+        <div class="section-head">
+          <div>
+            <h2><span class="live-dot"></span>Ao vivo agora</h2>
+            <p class="section-sub">Escolha uma partida para acompanhar o placar e cada lance.</p>
+          </div>
+          <span class="sync-pill"><i></i>Atualiza sozinho</span>
+        </div>
+        <div id="live-picker" class="live-picker" aria-label="Partidas em andamento"></div>
+        <div id="live-stage"></div>
+      </section>
+
+      <div class="two-col">
+        <section class="section">
+          <div class="section-head"><div><h2>Próximos jogos</h2><p class="section-sub" id="upcoming-sub"></p></div></div>
+          <div id="upcoming" class="upcoming"></div>
+          <a class="link-more" href="tabela-jogos.html">Ver tabela completa</a>
+        </section>
+        <section class="section">
+          <div class="section-head"><div><h2>Classificação</h2><p class="section-sub">Top 5 do turno</p></div></div>
+          <div id="ranking" class="mini-rank"></div>
+          <a class="link-more" href="classificacao.html">Ver classificação completa</a>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer"><div class="container"><span>Jogos Estudantis SESI 2026</span><span>SESI · Serviço Social da Indústria</span></div></footer>
+
+  <script type="module" src="js/firebase-setup.js"></script>
+  <script type="module" src="js/app.js"></script>
+  <script src="js/ui.js"></script>
+  <script>
+    var selecionado = null;
+    var ultimo = {};           // últimos placares exibidos (para animar mudanças)
+    var esc = JESUI.esc, ico = JESUI.ico;
+
+    JESUI.start({ page: 'home' }, function () {
+      render();
+      onSync(render);
+      window.addEventListener('jes2026-categoria-changed', function () { selecionado = null; ultimo = {}; render(); });
+      JESUI.watchLive();
+      setInterval(tickRelogio, 1000);
+    });
+
+    function render() {
+      var t = getCategoria();
+      document.getElementById('hero-turno').textContent = 'Turno da ' + TURNOS[t].nome.toLowerCase() + ' · ' + TURNOS[t].series;
+      var jogos = getJogos();
+      var hoje = hojeLocal();
+      var ativos = jogos.filter(function (j) { return j.status === 'AO VIVO' || j.status === 'PAUSADO'; })
+        .sort(function (a, b) { return (a.status === 'AO VIVO' ? 0 : 1) - (b.status === 'AO VIVO' ? 0 : 1) || a.horario.localeCompare(b.horario); });
+      var encerrados = jogos.filter(function (j) { return j.status === 'FINALIZADO' && j.data === hoje; })
+        .sort(function (a, b) { return b.horario.localeCompare(a.horario); });
+      var lista = ativos.concat(encerrados);
+      if (!lista.some(function (j) { return j.id === selecionado; })) selecionado = lista[0] ? lista[0].id : null;
+      renderPicker(lista);
+      renderStage(lista);
+      renderUpcoming(jogos, hoje);
+      renderRanking();
+    }
+
+    function statusPill(j) {
+      if (j.status === 'AO VIVO') return '<span class="pill pill-live"><i></i>Ao vivo</span>';
+      if (j.status === 'PAUSADO') return '<span class="pill pill-pause">' + esc(labelPausa(j).titulo.toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); })) + '</span>';
+      if (j.status === 'FINALIZADO') return '<span class="pill pill-end">Encerrado</span>';
+      return '<span class="pill">Em breve</span>';
+    }
+
+    function renderPicker(lista) {
+      var el = document.getElementById('live-picker');
+      if (!lista.length) { el.innerHTML = ''; return; }
+      el.innerHTML = lista.map(function (j) {
+        var r = resultado(j);
+        return '<button type="button" class="pick' + (j.id === selecionado ? ' is-selected' : '') + '" data-id="' + esc(j.id) + '" style="--c:' + JESUI.corModalidade(j) + '">' +
+          '<span class="pick-sport">' + esc(j.modalidade) + ' ' + JESUI.generoCurto(j.genero) + '</span>' +
+          '<span class="pick-teams"><b>' + esc(j.timeA) + '</b><em>' + r.a + ' × ' + r.b + '</em><b>' + esc(j.timeB) + '</b></span>' + statusPill(j) + '</button>';
+      }).join('');
+      el.querySelectorAll('.pick').forEach(function (b) {
+        b.addEventListener('click', function () { selecionado = b.dataset.id; ultimo = {}; render(); });
+      });
+    }
+
+    function renderStage(lista) {
+      var el = document.getElementById('live-stage');
+      var j = lista.find(function (x) { return x.id === selecionado; });
+      if (!j) {
+        el.innerHTML = '<div class="empty"><span class="empty-ico">' + ico('ball', 40) + '</span><h3>Nenhuma partida em andamento</h3><p>Quando um jogo começar, o placar aparece aqui automaticamente. Veja os horários na <a href="tabela-jogos.html">tabela de jogos</a>.</p></div>';
+        return;
+      }
+      var kind = sportKind(j.modalidade), volei = kind === 'volei';
+      var encerrado = j.status === 'FINALIZADO', pausado = j.status === 'PAUSADO';
+      var big = volei && !encerrado ? { a: j.placarA, b: j.placarB } : resultado(j);
+      var res = resultado(j);
+      var vencedor = encerrado ? (res.a > res.b ? 'A' : res.b > res.a ? 'B' : null) : null;
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+
+      var setsRow = '';
+      if (volei) {
+        setsRow = '<div class="sets-row"><span class="sets-label">Sets</span>' +
+          '<div class="sets-pips">' + pips(j.setsA, 'A') + '</div><b class="sets-num" data-side="sA">' + j.setsA + '</b><i>×</i><b class="sets-num" data-side="sB">' + j.setsB + '</b><div class="sets-pips">' + pips(j.setsB, 'B') + '</div></div>';
+      }
+      var parciais = volei && j.parciais.length ? '<div class="parciais">' + j.parciais.map(function (p, i) {
+        return '<span class="parcial ' + (p.a > p.b ? 'wa' : 'wb') + '"><small>Set ' + (i + 1) + '</small>' + p.a + ' – ' + p.b + '</span>';
+      }).join('') + '</div>' : '';
+
+      var overlay = '';
+      if (pausado) {
+        var lp = labelPausa(j);
+        overlay = '<div class="board-overlay kind-' + lp.chave + '"><div class="bo-stripes"></div><div class="bo-content">' + ico(lp.chave === 'fim_set' ? 'flag' : 'whistle', 44) +
+          '<strong>' + esc(lp.titulo) + '</strong><span>' + esc(lp.sub) + '</span></div></div>';
+      }
+      var fim = encerrado ? '<div class="board-end"><span class="be-ico">' + ico('trophy', 22) + '</span><b>Fim de jogo</b>' +
+        '<span>' + (vencedor ? 'Vitória de ' + esc(vencedor === 'A' ? j.timeA : j.timeB) : 'Empate') + '</span></div>' : '';
+
+      var eventos = j.eventos.slice().reverse();
+      el.innerHTML =
+        '<article class="board" data-kind="' + kind + '" data-status="' + esc(j.status) + '" style="--c:' + JESUI.corModalidade(j) + '">' +
+          '<header class="board-head"><span class="sport-chip">' + esc(j.modalidade) + ' ' + JESUI.generoCurto(j.genero) + '</span>' +
+          '<span class="board-period">' + esc(encerrado ? 'Encerrado' : labelPeriodo(j)) + '</span>' + statusPill(j) + '</header>' +
+          '<div class="board-body">' +
+            '<div class="b-team' + (vencedor === 'A' ? ' is-winner' : '') + '">' + JESUI.brasao(j.timeA, 'crest-xl') + '<span class="b-name">' + esc(j.timeA) + '</span></div>' +
+            '<div class="b-center"><div class="b-score"><span class="num" data-side="A">' + pad(big.a) + '</span><i>×</i><span class="num" data-side="B">' + pad(big.b) + '</span></div>' +
+              setsRow + (encerrado ? '' : '<div class="b-clock" id="clock">' + formatarTempoJogo(getTempoJogo(j)) + '</div>') + '</div>' +
+            '<div class="b-team' + (vencedor === 'B' ? ' is-winner' : '') + '">' + JESUI.brasao(j.timeB, 'crest-xl') + '<span class="b-name">' + esc(j.timeB) + '</span></div>' +
+          '</div>' + parciais +
+          '<footer class="board-foot">' + ico('flag', 15) + esc(j.local || 'Local a definir') + '<i></i>' + ico('clock', 15) + esc(j.horario) + '</footer>' +
+          overlay + fim +
+        '</article>' +
+        '<div class="feed"><h3>Lance a lance</h3><div class="feed-list">' +
+        (eventos.length ? eventos.map(function (ev) { return feedItem(j, ev); }).join('') : '<p class="muted">Nenhum lance registrado ainda.</p>') + '</div></div>';
+
+      /* anima só o que mudou desde a última renderização */
+      var prev = ultimo[j.id];
+      if (prev) {
+        [['A', 'a'], ['B', 'b']].forEach(function (p) {
+          if (prev[p[1]] !== big[p[1]]) bump(el.querySelector('.num[data-side="' + p[0] + '"]'));
+        });
+        if (volei && (prev.sa !== j.setsA)) bump(el.querySelector('[data-side="sA"]'));
+        if (volei && (prev.sb !== j.setsB)) bump(el.querySelector('[data-side="sB"]'));
+      }
+      ultimo[j.id] = { a: big.a, b: big.b, sa: j.setsA, sb: j.setsB };
+    }
+
+    function pips(n, side) {
+      var out = '';
+      for (var i = 0; i < REGRAS_VOLEI.setsParaVencer; i++) out += '<span class="pip' + (i < n ? ' on' : '') + '"></span>';
+      return out;
+    }
+    function bump(node) { if (!node) return; node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); }
+
+    function feedItem(j, ev) {
+      var team = ev.time === 'A' ? j.timeA : ev.time === 'B' ? j.timeB : '';
+      var pts = (ev.tipo === 'gol' || ev.tipo === 'ponto') && sportKind(j.modalidade) === 'basquete' ? '<span class="feed-pts pts-' + ev.valor + '">+' + ev.valor + '</span>' : '';
+      var icon = ev.tipo === 'gol' || ev.tipo === 'ponto' ? 'ball' : ev.tipo === 'cartao' ? 'card' : ev.tipo === 'substituicao' ? 'swap' : ev.tipo === 'tempo' ? 'clock' : 'info';
+      var cor = /vermelho/i.test(ev.descricao) ? ' card-red' : /amarelo/i.test(ev.descricao) ? ' card-yellow' : '';
+      return '<div class="feed-item side-' + (ev.time || 'x') + cor + '"><span class="feed-min">' + esc(ev.minuto || '—') + '</span><span class="feed-ico">' + ico(icon, 18) + '</span>' +
+        '<span class="feed-txt">' + esc(ev.descricao) + (team ? '<small>' + esc(team) + '</small>' : '') + '</span>' + pts + '</div>';
+    }
+
+    function tickRelogio() {
+      var c = document.getElementById('clock');
+      var j = selecionado && getJogoById(selecionado);
+      if (c && j) c.textContent = formatarTempoJogo(getTempoJogo(j));
+    }
+
+    function renderUpcoming(jogos, hoje) {
+      var proximos = jogos.filter(function (j) { return j.status === 'EM BREVE'; })
+        .sort(function (a, b) { return (a.data + a.horario).localeCompare(b.data + b.horario); });
+      var deHoje = proximos.filter(function (j) { return j.data === hoje; });
+      var lista = (deHoje.length ? deHoje : proximos).slice(0, 6);
+      document.getElementById('upcoming-sub').textContent = deHoje.length ? 'Agenda de hoje' : 'Próximas partidas do turno';
+      document.getElementById('upcoming').innerHTML = lista.length ? lista.map(function (j) {
+        var d = j.data.split('-');
+        return '<div class="up-item" style="--c:' + JESUI.corModalidade(j) + '"><div class="up-time"><b>' + esc(j.horario) + '</b>' + (j.data !== hoje ? '<small>' + d[2] + '/' + d[1] + '</small>' : '') + '</div>' +
+          '<div class="up-info"><span class="up-sport">' + esc(j.modalidade) + ' ' + JESUI.generoCurto(j.genero) + '</span><b>' + esc(j.timeA) + ' <em>×</em> ' + esc(j.timeB) + '</b>' +
+          '<small>' + esc(j.local || 'Local a definir') + '</small></div></div>';
+      }).join('') : '<p class="muted">Nenhum jogo agendado para este turno.</p>';
+    }
+
+    function renderRanking() {
+      var top = getClassificacao().slice(0, 5);
+      document.getElementById('ranking').innerHTML = top.length ? top.map(function (r) {
+        return '<div class="mr-row pos-' + r.posicao + '"><span class="mr-pos">' + r.posicao + '</span>' + JESUI.brasao(r.unidade, 'crest-sm') + '<b>' + esc(r.unidade) + '</b><span class="mr-pts">' + r.pontos + '<small>pts</small></span></div>';
+      }).join('') : '<p class="muted">Nenhuma equipe cadastrada neste turno.</p>';
+    }
+  </script>
+</body>
+</html>

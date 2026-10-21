@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#E10600">
+  <title>JES 2026 — Modalidades e regulamentos</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>document.documentElement.setAttribute('data-turno', localStorage.getItem('jes2026_categoria') || 'manha');</script>
+</head>
+<body>
+  <div id="app-header"></div>
+
+  <main class="container page">
+    <div class="page-title">
+      <h1>Modalidades e regulamentos</h1>
+      <p id="page-turno"></p>
+    </div>
+
+    <div class="reg-layout">
+      <nav class="reg-menu" id="reg-menu" aria-label="Modalidades"></nav>
+      <section id="reg-view" class="reg-view"></section>
+    </div>
+  </main>
+
+  <footer class="site-footer"><div class="container"><span>Jogos Estudantis SESI 2026</span><span>SESI · Serviço Social da Indústria</span></div></footer>
+
+  <script type="module" src="js/firebase-setup.js"></script>
+  <script type="module" src="js/app.js"></script>
+  <script src="js/regulamentos.js"></script>
+  <script src="js/ui.js"></script>
+  <script>
+    var esc = JESUI.esc, ico = JESUI.ico;
+    var escolhido = null;
+
+    JESUI.start({ page: 'mod', loadingMsg: 'Carregando regulamentos…' }, function () {
+      render();
+      onSync(render);
+      window.addEventListener('jes2026-categoria-changed', function () { escolhido = null; render(); });
+      JESUI.watchLive();
+    });
+
+    function esportes() {
+      var vistos = {}, lista = [];
+      getModalidades().forEach(function (m) { if (!vistos[m.nome]) { vistos[m.nome] = 1; lista.push(m); } });
+      return lista;
+    }
+
+    function pontuacao(nome) {
+      var k = sportKind(nome);
+      if (k === 'basquete') return [['1', 'Lance livre'], ['2', 'Cesta de dentro do garrafão'], ['3', 'Cesta de três pontos']];
+      if (k === 'volei') return [[REGRAS_VOLEI.pontosSet, 'Pontos para vencer um set (diferença de 2)'], [REGRAS_VOLEI.pontosTieBreak, 'Pontos no set decisivo'], ['2 sets', 'Vence a partida (2×0 ou 2×1)']];
+      if (k === 'futsal' || k === 'handebol') return [['1', 'Cada gol vale um ponto no placar']];
+      return null;
+    }
+
+    function render() {
+      var t = getCategoria();
+      document.getElementById('page-turno').textContent = 'Turno da ' + TURNOS[t].nome.toLowerCase() + ' · ' + TURNOS[t].series;
+      var lista = esportes();
+      var menu = document.getElementById('reg-menu'), view = document.getElementById('reg-view');
+      if (!lista.length) { menu.innerHTML = ''; view.innerHTML = '<div class="empty"><span class="empty-ico">' + ico('book', 40) + '</span><h3>Nenhuma modalidade neste turno</h3><p>Os regulamentos aparecem aqui quando as modalidades forem cadastradas.</p></div>'; return; }
+      if (!lista.some(function (m) { return m.nome === escolhido; })) escolhido = lista[0].nome;
+
+      menu.innerHTML = lista.map(function (m) {
+        return '<button type="button" class="reg-item' + (m.nome === escolhido ? ' active' : '') + '" data-n="' + esc(m.nome) + '" style="--c:' + esc(m.cor || '#E10600') + '"><i></i>' + esc(m.nome) + '</button>';
+      }).join('');
+      menu.querySelectorAll('.reg-item').forEach(function (b) { b.addEventListener('click', function () { escolhido = b.dataset.n; render(); }); });
+
+      var mod = lista.find(function (m) { return m.nome === escolhido; });
+      var reg = getRegulamentos()[escolhido] || { visaoGeral: '', regras: [] };
+      var generos = getModalidades().filter(function (m) { return m.nome === escolhido; }).map(function (m) { return JESUI.generoCurto(m.genero); });
+      var jogos = getJogos().filter(function (j) { return j.modalidade === escolhido; }).length;
+      var pts = pontuacao(escolhido);
+
+      view.innerHTML =
+        '<header class="reg-head" style="--c:' + esc(mod.cor || '#E10600') + '"><h2>' + esc(escolhido) + '</h2>' +
+        '<div class="reg-meta"><span>' + esc(generos.join(' · ')) + '</span><span>' + jogos + (jogos === 1 ? ' jogo' : ' jogos') + ' no turno</span></div></header>' +
+        '<div class="reg-block"><h3>' + ico('info', 20) + 'Visão geral</h3><p>' + esc(reg.visaoGeral || 'Regulamento em atualização.') + '</p></div>' +
+        (pts ? '<div class="reg-block"><h3>' + ico('target', 20) + 'Como a pontuação funciona</h3><div class="score-rules">' + pts.map(function (p) { return '<div><strong>' + esc(p[0]) + '</strong><span>' + esc(p[1]) + '</span></div>'; }).join('') + '</div></div>' : '') +
+        '<div class="reg-block"><h3>' + ico('shield', 20) + 'Regras básicas</h3>' +
+        (reg.regras.length ? '<div class="rules-grid">' + reg.regras.map(function (r) {
+          return '<article class="rule"><span class="rule-ico">' + getRegulamentoIcon(r.icone) + '</span><div><h4>' + esc(r.titulo) + '</h4><p>' + esc(r.descricao) + '</p></div></article>';
+        }).join('') + '</div>' : '<p class="muted">As regras desta modalidade ainda não foram cadastradas.</p>') + '</div>';
+    }
+  </script>
+</body>
+</html>

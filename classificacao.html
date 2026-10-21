@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#E10600">
+  <title>JES 2026 — Classificação</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>document.documentElement.setAttribute('data-turno', localStorage.getItem('jes2026_categoria') || 'manha');</script>
+</head>
+
+<body>
+  <div id="app-header"></div>
+
+  <main class="container page">
+    <div class="page-title">
+      <h1>Classificação</h1>
+      <p id="page-turno"></p>
+    </div>
+
+    <div class="tabs-scroll" id="tabs" role="tablist" aria-label="Modalidade"></div>
+    <div id="podium" class="podium"></div>
+    <div class="rank-table" id="rank-table"></div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container"><span>Jogos Estudantis SESI 2026</span><span>SESI · Serviço Social da Indústria</span></div>
+  </footer>
+
+  <script type="module" src="js/firebase-setup.js"></script>
+  <script type="module" src="js/app.js"></script>
+  <script src="js/ui.js"></script>
+  <script>
+    var esc = JESUI.esc, ico = JESUI.ico;
+    var esporte = 'all';
+
+    JESUI.start({ page: 'rank', loadingMsg: 'Calculando a classificação…' }, function () {
+      render();
+      onSync(render);
+      window.addEventListener('jes2026-categoria-changed', function () { esporte = 'all'; render(); });
+      JESUI.watchLive();
+    });
+
+    function venceu(j, nome) {
+      var r = resultado(j);
+      return (j.timeA === nome && r.a > r.b) || (j.timeB === nome && r.b > r.a);
+    }
+
+    function linhas() {
+      var jogos = getJogos().filter(function (j) { return esporte === 'all' || j.modalidade === esporte; });
+      var porId = {}; getJogos().forEach(function (j) { porId[j.id] = j; });
+      var rows = getEquipes().map(function (eq) {
+        var meus = jogos.filter(function (j) { return j.timeA === eq.nome || j.timeB === eq.nome; });
+        var fin = meus.filter(function (j) { return j.status === 'FINALIZADO'; }).sort(function (a, b) { return (a.data + a.horario).localeCompare(b.data + b.horario); });
+        var v = fin.filter(function (j) { return venceu(j, eq.nome); }).length;
+        var e = fin.filter(function (j) { var r = resultado(j); return r.a === r.b; }).length;
+        var pts = getPontosPorEquipe(eq.nome).filter(function (p) {
+          if (esporte === 'all') return true;
+          var jg = porId[p.jogoId]; return jg && jg.modalidade === esporte;
+        }).reduce(function (s, p) { return s + (parseInt(p.pontos, 10) || 0); }, 0);
+        return {
+          nome: eq.nome, j: fin.length, v: v, e: e, d: fin.length - v - e, pts: pts,
+          forma: fin.slice(-5).map(function (j) { var r = resultado(j); return venceu(j, eq.nome) ? 'v' : r.a === r.b ? 'e' : 'd'; })
+        };
+      });
+      rows.sort(function (a, b) { return b.pts - a.pts || b.v - a.v || a.nome.localeCompare(b.nome); });
+      rows.forEach(function (r, i) { r.pos = i + 1; });
+      return rows;
+    }
+
+    function render() {
+      var t = getCategoria();
+      document.getElementById('page-turno').textContent = 'Turno da ' + TURNOS[t].nome.toLowerCase() + ' · ' + TURNOS[t].series;
+      var nomes = []; getModalidades().forEach(function (m) { if (nomes.indexOf(m.nome) < 0) nomes.push(m.nome); });
+      if (esporte !== 'all' && nomes.indexOf(esporte) < 0) esporte = 'all';
+      var tabs = document.getElementById('tabs');
+      tabs.innerHTML = ['all'].concat(nomes).map(function (n) {
+        return '<button type="button" role="tab" class="tab' + (n === esporte ? ' active' : '') + '" aria-selected="' + (n === esporte) + '" data-n="' + esc(n) + '">' + (n === 'all' ? 'Geral' : esc(n)) + '</button>';
+      }).join('');
+      tabs.querySelectorAll('.tab').forEach(function (b) { b.addEventListener('click', function () { esporte = b.dataset.n; render(); }); });
+
+      var rows = linhas();
+      if (!rows.length) {
+        document.getElementById('podium').innerHTML = '';
+        document.getElementById('rank-table').innerHTML = '<div class="empty"><span class="empty-ico">' + ico('rank', 40) + '</span><h3>Nenhuma equipe neste turno</h3><p>As equipes aparecem aqui assim que forem cadastradas.</p></div>';
+        return;
+      }
+      var top = rows.slice(0, 3), ordem = [top[1], top[0], top[2]].filter(Boolean);
+      document.getElementById('podium').innerHTML = ordem.map(function (r) {
+        return '<div class="pod pod-' + r.pos + '"><div class="pod-crest">' + JESUI.brasao(r.nome, 'crest-lg') + '<span class="pod-medal">' + r.pos + '</span></div><b>' + esc(r.nome) + '</b>' +
+          '<div class="pod-pts"><strong>' + r.pts + '</strong><small>pontos</small></div><div class="pod-step"></div></div>';
+      }).join('');
+
+      document.getElementById('rank-table').innerHTML =
+        '<div class="rt-head"><span>#</span><span>Equipe</span><span title="Jogos">J</span><span title="Vitórias">V</span><span title="Empates">E</span><span title="Derrotas">D</span><span>Pts</span><span class="rt-form">Forma</span></div>' +
+        rows.map(function (r) {
+          return '<div class="rt-row pos-' + r.pos + '"><span class="rt-pos">' + r.pos + '</span><span class="rt-team">' + JESUI.brasao(r.nome, 'crest-sm') + '<b>' + esc(r.nome) + '</b></span>' +
+            '<span>' + r.j + '</span><span>' + r.v + '</span><span>' + r.e + '</span><span>' + r.d + '</span><strong class="rt-pts">' + r.pts + '</strong>' +
+            '<span class="rt-form">' + (r.forma.length ? r.forma.map(function (f) { return '<i class="f-' + f + '" title="' + ({ v: 'Vitória', e: 'Empate', d: 'Derrota' })[f] + '"></i>'; }).join('') : '<small class="muted">—</small>') + '</span></div>';
+        }).join('');
+    }
+  </script>
+</body>
+
+</html>

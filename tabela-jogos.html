@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#E10600">
+  <title>JES 2026 — Tabela de jogos</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>document.documentElement.setAttribute('data-turno', localStorage.getItem('jes2026_categoria') || 'manha');</script>
+</head>
+<body>
+  <div id="app-header"></div>
+
+  <main class="container page">
+    <div class="page-title">
+      <h1>Tabela de jogos</h1>
+      <p id="page-turno"></p>
+    </div>
+
+    <div class="filters" id="filters">
+      <label>Dia<select id="f-data"><option value="all">Todos os dias</option><option value="today">Hoje</option></select></label>
+      <label>Modalidade<select id="f-esporte"><option value="all">Todas</option></select></label>
+      <label>Gênero<select id="f-genero"><option value="all">Todos</option><option value="MASCULINO">Masculino</option><option value="FEMININO">Feminino</option><option value="MISTO">Misto</option></select></label>
+      <label>Equipe<select id="f-equipe"><option value="all">Todas</option></select></label>
+      <label>Situação<select id="f-status"><option value="all">Todas</option><option value="AO VIVO">Ao vivo</option><option value="PAUSADO">Pausado</option><option value="EM BREVE">Em breve</option><option value="FINALIZADO">Encerrado</option></select></label>
+    </div>
+
+    <div id="games"></div>
+  </main>
+
+  <footer class="site-footer"><div class="container"><span>Jogos Estudantis SESI 2026</span><span>SESI · Serviço Social da Indústria</span></div></footer>
+
+  <script type="module" src="js/firebase-setup.js"></script>
+  <script type="module" src="js/app.js"></script>
+  <script src="js/ui.js"></script>
+  <script>
+    var esc = JESUI.esc, ico = JESUI.ico;
+    JESUI.start({ page: 'jogos', loadingMsg: 'Montando a tabela de jogos…' }, function () {
+      popularFiltros(); render();
+      onSync(function () { popularFiltros(); render(); });
+      window.addEventListener('jes2026-categoria-changed', function () { popularFiltros(); render(); });
+      document.getElementById('filters').addEventListener('change', render);
+      JESUI.watchLive();
+    });
+
+    function popularFiltros() {
+      var esp = document.getElementById('f-esporte'), eq = document.getElementById('f-equipe');
+      var e1 = esp.value, e2 = eq.value;
+      var nomes = []; getModalidades().forEach(function (m) { if (nomes.indexOf(m.nome) < 0) nomes.push(m.nome); });
+      esp.innerHTML = '<option value="all">Todas</option>' + nomes.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('');
+      eq.innerHTML = '<option value="all">Todas</option>' + getEquipes().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).map(function (e) { return '<option>' + esc(e.nome) + '</option>'; }).join('');
+      esp.value = nomes.indexOf(e1) >= 0 ? e1 : 'all';
+      eq.value = getEquipes().some(function (e) { return e.nome === e2; }) ? e2 : 'all';
+    }
+
+    function filtrados() {
+      var v = function (id) { return document.getElementById(id).value; };
+      var hoje = hojeLocal();
+      return getJogos().filter(function (j) {
+        if (v('f-data') === 'today' && j.data !== hoje) return false;
+        if (v('f-esporte') !== 'all' && j.modalidade !== v('f-esporte')) return false;
+        if (v('f-genero') !== 'all' && j.genero !== v('f-genero')) return false;
+        if (v('f-equipe') !== 'all' && j.timeA !== v('f-equipe') && j.timeB !== v('f-equipe')) return false;
+        if (v('f-status') !== 'all' && j.status !== v('f-status')) return false;
+        return true;
+      });
+    }
+
+    var MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    var DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+    function dataLonga(s) {
+      var p = s.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+      return DIAS[d.getDay()] + ', ' + p[2] + ' de ' + MESES[+p[1] - 1];
+    }
+
+    function render() {
+      var t = getCategoria();
+      document.getElementById('page-turno').textContent = 'Turno da ' + TURNOS[t].nome.toLowerCase() + ' · ' + TURNOS[t].series;
+      var jogos = filtrados();
+      var box = document.getElementById('games');
+      if (!jogos.length) { box.innerHTML = '<div class="empty"><span class="empty-ico">' + ico('cal', 40) + '</span><h3>Nenhum jogo encontrado</h3><p>Mude os filtros para ver outras partidas deste turno.</p></div>'; return; }
+      var grupos = {};
+      jogos.forEach(function (j) { (grupos[j.data] = grupos[j.data] || []).push(j); });
+      var hoje = hojeLocal();
+      box.innerHTML = Object.keys(grupos).sort().map(function (d) {
+        var lista = grupos[d].sort(function (a, b) { return a.horario.localeCompare(b.horario); });
+        var vivos = lista.filter(function (j) { return j.status === 'AO VIVO'; }).length;
+        return '<section class="day"><h2 class="day-title"><span>' + dataLonga(d) + '</span>' + (d === hoje ? '<em class="today-tag">Hoje</em>' : '') +
+          '<small>' + lista.length + (lista.length === 1 ? ' jogo' : ' jogos') + (vivos ? ' · ' + vivos + ' ao vivo' : '') + '</small></h2>' +
+          '<div class="game-grid">' + lista.map(card).join('') + '</div></section>';
+      }).join('');
+    }
+
+    function card(j) {
+      var r = resultado(j), fim = j.status === 'FINALIZADO', ini = j.status !== 'EM BREVE';
+      var va = fim && r.a > r.b, vb = fim && r.b > r.a;
+      var pill = j.status === 'AO VIVO' ? '<span class="pill pill-live"><i></i>Ao vivo</span>' : j.status === 'PAUSADO' ? '<span class="pill pill-pause">Pausado</span>' :
+        fim ? '<span class="pill pill-end">Encerrado</span>' : '<span class="pill">' + esc(j.horario) + '</span>';
+      var extra = sportKind(j.modalidade) === 'volei' && j.parciais.length ? '<div class="gc-sets">' + j.parciais.map(function (p) { return p.a + '–' + p.b; }).join(' · ') + '</div>' : '';
+      return '<article class="game-card status-' + j.status.replace(' ', '-').toLowerCase() + '" style="--c:' + JESUI.corModalidade(j) + '">' +
+        '<header><span class="sport-chip">' + esc(j.modalidade) + ' ' + JESUI.generoCurto(j.genero) + '</span>' + pill + '</header>' +
+        '<div class="gc-row' + (va ? ' win' : '') + '">' + JESUI.brasao(j.timeA, 'crest-sm') + '<b>' + esc(j.timeA) + '</b><span class="gc-score">' + (ini ? r.a : '–') + '</span></div>' +
+        '<div class="gc-row' + (vb ? ' win' : '') + '">' + JESUI.brasao(j.timeB, 'crest-sm') + '<b>' + esc(j.timeB) + '</b><span class="gc-score">' + (ini ? r.b : '–') + '</span></div>' + extra +
+        '<footer>' + ico('clock', 14) + esc(j.horario) + '<i></i>' + ico('flag', 14) + esc(j.local || 'Local a definir') + (r.unidade === 'sets' && ini ? '<span class="gc-unit">sets</span>' : '') + '</footer></article>';
+    }
+  </script>
+</body>
+</html>
